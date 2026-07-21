@@ -1,0 +1,186 @@
+/* パイロンスラローム計測アプリ 全体スタイル */
+/* 方針: 走行前でも押しやすい大きなボタン・高コントラスト・日本語UI */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif;
+  background: #101418;
+  color: #e8ecf0;
+  min-height: 100vh;
+}
+
+/* ---------- ヘッダー ---------- */
+#app-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: #1a2027;
+  border-bottom: 1px solid #2a323c;
+}
+#header-title { font-size: 1.1rem; font-weight: 600; }
+.btn-back {
+  background: none;
+  border: 1px solid #3a444f;
+  color: #e8ecf0;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 1rem;
+}
+
+main { padding: 16px; max-width: 720px; margin: 0 auto; }
+
+.hidden { display: none !important; }
+
+/* ---------- ボタン ---------- */
+.btn {
+  display: block;
+  width: 100%;
+  border: 1px solid #3a444f;
+  border-radius: 12px;
+  background: #232b34;
+  color: #e8ecf0;
+  font-size: 1.05rem;
+  padding: 14px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.btn:active { transform: scale(0.98); }
+.btn:disabled { opacity: 0.4; }
+.btn-primary { background: #1565c0; border-color: #1e88e5; }
+.btn-danger  { background: #b62b2b; border-color: #d04545; }
+.btn-large   { font-size: 1.2rem; padding: 18px; }
+.btn-huge    { font-size: 1.4rem; padding: 24px; font-weight: 700; }
+
+.home-buttons { display: flex; flex-direction: column; gap: 16px; margin-top: 8px; }
+.row-buttons  { display: flex; gap: 12px; margin-top: 16px; }
+
+/* ---------- 汎用ボックス ---------- */
+.warning-box {
+  background: #4a3b12;
+  border: 1px solid #8a6d1a;
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 16px;
+  line-height: 1.6;
+}
+.status-box {
+  background: #1a2027;
+  border: 1px solid #2a323c;
+  border-radius: 10px;
+  padding: 12px;
+  margin: 12px 0;
+}
+.hint { color: #9aa7b3; font-size: 0.85rem; line-height: 1.6; margin-top: 8px; }
+.privacy-note { color: #9aa7b3; font-size: 0.8rem; text-align: center; margin-top: 24px; }
+.placeholder-box {
+  border: 1px dashed #3a444f;
+  border-radius: 10px;
+  padding: 32px 16px;
+  text-align: center;
+  line-height: 2;
+}
+
+/* ---------- 初回注意モーダル ---------- */
+.modal {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.75);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100;
+  padding: 16px;
+}
+.modal-box {
+  background: #1a2027;
+  border: 1px solid #3a444f;
+  border-radius: 14px;
+  padding: 24px;
+  max-width: 480px;
+}
+.modal-box h2 { margin-bottom: 16px; }
+.notice-list { padding-left: 20px; line-height: 1.9; margin-bottom: 20px; }
+
+/* ---------- 記録画面 ---------- */
+.camera-placeholder {
+  background: #000;
+  border-radius: 10px;
+  height: 160px;
+  display: flex; align-items: center; justify-content: center;
+  color: #667;
+  margin-bottom: 16px;
+}
+#record-controls { display: flex; flex-direction: column; gap: 12px; }
+
+.countdown {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.85);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 50;
+}
+#countdown-number { font-size: 9rem; font-weight: 800; color: #ffd54f; }
+
+#recording-view { text-align: center; padding-top: 8px; }
+.rec-indicator { color: #ff5252; font-weight: 700; font-size: 1.1rem; }
+.rec-dot {
+  display: inline-block; width: 12px; height: 12px; border-radius: 50%;
+  background: #ff5252; animation: blink 1s infinite;
+}
+@keyframes blink { 50% { opacity: 0.2; } }
+.rec-time { font-size: 2rem; margin: 12px 0 4px; }
+.rec-g-label { color: #9aa7b3; }
+.rec-g { font-size: 5rem; font-weight: 800; margin-bottom: 16px; }
+
+/* ---------- 結果画面 ---------- */
+.form-row { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.form-row label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; color: #9aa7b3; }
+.form-row input[type="text"], .settings-list select {
+  background: #232b34; border: 1px solid #3a444f; border-radius: 8px;
+  color: #e8ecf0; padding: 10px; font-size: 1rem;
+}
+.check-label { flex-direction: row !important; align-items: center; gap: 8px !important; color: #e8ecf0 !important; }
+.check-label input { width: 20px; height: 20px; }
+
+.summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px;
+}
+.summary-item {
+  background: #1a2027; border: 1px solid #2a323c; border-radius: 10px; padding: 12px;
+}
+.summary-item .label { color: #9aa7b3; font-size: 0.8rem; }
+.summary-item .value { font-size: 1.4rem; font-weight: 700; margin-top: 4px; }
+
+.chart-box { margin-top: 16px; }
+#speed-dist-chart { width: 100%; background: #1a2027; border-radius: 10px; }
+
+/* 計測区間の手動調整 */
+.section-adjust {
+  background: #1a2027; border: 1px solid #2a323c; border-radius: 10px;
+  padding: 12px; margin-top: 12px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.section-adjust label {
+  display: flex; align-items: center; gap: 8px;
+  color: #9aa7b3; font-size: 0.9rem;
+}
+.section-adjust input[type="range"] { flex: 1; }
+.section-adjust .btn { padding: 8px; font-size: 0.9rem; }
+.chart-title { color: #9aa7b3; font-size: 0.9rem; margin-bottom: 6px; }
+#preview-chart { width: 100%; background: #1a2027; border-radius: 10px; }
+
+/* ---------- 走行一覧 ---------- */
+.run-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.run-item {
+  background: #1a2027; border: 1px solid #2a323c; border-radius: 10px; padding: 12px;
+}
+.run-item .run-title { font-weight: 700; font-size: 1.05rem; }
+.run-item .run-sub { color: #9aa7b3; font-size: 0.85rem; margin: 4px 0 10px; }
+.run-item .run-actions { display: flex; gap: 8px; }
+.run-item .run-actions .btn { width: auto; flex: 1; padding: 10px; font-size: 0.9rem; }
+.expert-badge {
+  display: inline-block; background: #8a6d1a; color: #fff;
+  border-radius: 6px; font-size: 0.75rem; padding: 2px 8px; margin-left: 8px;
+}
+
+/* ---------- 設定 ---------- */
+.settings-list { display: flex; flex-direction: column; gap: 16px; }
+.settings-list label { display: flex; flex-direction: column; gap: 6px; color: #9aa7b3; }

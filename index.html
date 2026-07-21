@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>パイロンスラローム計測</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- 初回起動時の安全上の注意(必ず表示する) -->
+  <div id="safety-modal" class="modal hidden">
+    <div class="modal-box">
+      <h2>ご利用前の注意</h2>
+      <ul class="notice-list">
+        <li>本アプリは<strong>クローズドコース(私有地・練習場)</strong>での使用を前提としています。</li>
+        <li>運転者は走行中にスマホを操作しないでください。開始はカウントダウン方式、停止は自動または同乗者が行います。</li>
+        <li>本アプリは運転練習の補助であり、計測値の正確性を保証するものではありません。</li>
+        <li>記録したデータ・動画はすべて端末内に保存され、外部には送信されません。</li>
+      </ul>
+      <button id="safety-agree" class="btn btn-primary btn-large">同意して使いはじめる</button>
+    </div>
+  </div>
+
+  <!-- ヘッダー(ホーム以外で戻るボタンを表示) -->
+  <header id="app-header">
+    <button id="btn-back" class="btn-back hidden">&#8592; 戻る</button>
+    <h1 id="header-title">パイロンスラローム計測</h1>
+  </header>
+
+  <main>
+
+    <!-- ========== ホーム画面 ========== -->
+    <section id="screen-home" class="screen">
+      <div id="calib-warning" class="warning-box hidden">
+        キャリブレーション(傾き補正)がまだです。<br>記録画面で先に実施してください。
+      </div>
+      <div class="home-buttons">
+        <button class="btn btn-primary btn-huge" data-goto="record">記録開始</button>
+        <button class="btn btn-huge" data-goto="list">走行一覧</button>
+        <button class="btn btn-huge" data-goto="compare">比較</button>
+        <button class="btn btn-huge" data-goto="settings">設定</button>
+      </div>
+      <p class="privacy-note">データはすべて端末内に保存され、外部送信されません。</p>
+    </section>
+
+    <!-- ========== 記録画面 ========== -->
+    <section id="screen-record" class="screen hidden">
+      <div id="camera-area" class="camera-placeholder">
+        <p>カメラプレビュー(フェーズ2で実装)</p>
+      </div>
+
+      <!-- 記録前の操作 -->
+      <div id="record-controls">
+        <div id="calib-status" class="status-box">キャリブレーション: 未実施</div>
+        <button id="btn-calibrate" class="btn btn-large">キャリブレーション(停車状態で3秒)</button>
+        <button id="btn-start" class="btn btn-primary btn-huge" disabled>記録開始(5秒カウントダウン)</button>
+        <p class="hint">スマホを固定し、平らな場所に停車した状態でキャリブレーションしてください。横持ちを推奨します。</p>
+      </div>
+
+      <!-- カウントダウン表示 -->
+      <div id="countdown-overlay" class="countdown hidden">
+        <div id="countdown-number">5</div>
+      </div>
+
+      <!-- 記録中の表示 -->
+      <div id="recording-view" class="hidden">
+        <div class="rec-indicator"><span class="rec-dot"></span> 記録中</div>
+        <div class="rec-time" id="rec-elapsed">0.0 秒</div>
+        <div class="rec-g-label">横G</div>
+        <div class="rec-g" id="rec-lat-g">0.00</div>
+        <button id="btn-stop" class="btn btn-danger btn-huge">停止(同乗者用)</button>
+        <p class="hint" id="autostop-hint">自動停止: 発進後、速度2km/h未満が3秒続くと自動終了します</p>
+      </div>
+    </section>
+
+    <!-- ========== 結果画面 ========== -->
+    <section id="screen-result" class="screen hidden">
+      <div class="form-row">
+        <label>走行名 <input type="text" id="result-name"></label>
+        <label>ドライバー名 <input type="text" id="result-driver"></label>
+        <label class="check-label"><input type="checkbox" id="result-expert"> お手本(熟練者)として使う</label>
+        <button id="btn-save-meta" class="btn">メタ情報を保存</button>
+      </div>
+
+      <div id="result-summary" class="summary-grid"></div>
+
+      <div class="chart-box">
+        <div class="chart-title">横G の時系列(黄線 = 計測区間: 最初〜最後の切り返し)</div>
+        <canvas id="preview-chart" width="640" height="200"></canvas>
+      </div>
+
+      <!-- 計測区間の手動調整(自動検出がずれたときの保険) -->
+      <div id="section-adjust" class="section-adjust">
+        <label>計測開始 <input type="range" id="sec-start" step="100"> <span id="sec-start-label"></span></label>
+        <label>計測終了 <input type="range" id="sec-end" step="100"> <span id="sec-end-label"></span></label>
+        <button id="btn-sec-auto" class="btn">自動検出に戻す</button>
+      </div>
+
+      <div class="chart-box">
+        <div class="chart-title">速度の1秒ごとの分布(計測区間内)</div>
+        <canvas id="speed-dist-chart" width="640" height="220"></canvas>
+        <p class="hint">箱 = 中央50%の範囲、縦線 = 最小〜最大、横線 = 中央値。箱が細く高さが揃っているほど速度が一定です。速度は前後加速度の積分をGPSで補正した推定値です。</p>
+      </div>
+
+      <div class="row-buttons">
+        <button id="btn-download-csv" class="btn btn-primary btn-large">CSVを保存</button>
+        <button id="btn-download-video" class="btn btn-large" disabled>動画を保存(フェーズ2)</button>
+      </div>
+    </section>
+
+    <!-- ========== 走行一覧画面 ========== -->
+    <section id="screen-list" class="screen hidden">
+      <div id="storage-usage" class="hint"></div>
+      <ul id="run-list" class="run-list"></ul>
+      <p id="list-empty" class="hint hidden">保存された走行はまだありません。</p>
+    </section>
+
+    <!-- ========== 比較画面(フェーズ3で実装) ========== -->
+    <section id="screen-compare" class="screen hidden">
+      <div class="placeholder-box">
+        <p>比較機能(お手本比較・再現性チェック)はフェーズ3で実装します。</p>
+        <p class="hint">先に走行データを2本以上記録・保存しておくと、実装後すぐに試せます。</p>
+      </div>
+    </section>
+
+    <!-- ========== 設定画面 ========== -->
+    <section id="screen-settings" class="screen hidden">
+      <div class="settings-list">
+        <label class="check-label">
+          <input type="checkbox" id="set-autostop"> 自動停止を有効にする
+        </label>
+        <label>動画画質(フェーズ2で使用)
+          <select id="set-quality">
+            <option value="720">720p</option>
+            <option value="480">480p</option>
+          </select>
+        </label>
+        <label class="check-label">
+          <input type="checkbox" id="set-mock"> モックモード(PC開発用の疑似センサー)
+        </label>
+        <label>モックの走行タイプ
+          <select id="set-mock-preset">
+            <option value="expert">上手い走行(規則的)</option>
+            <option value="wobble">ばらつきの大きい走行</option>
+          </select>
+        </label>
+        <div class="status-box" id="sensor-rate">記録レート: -</div>
+        <button id="btn-wipe" class="btn btn-danger">データを全削除</button>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- 読み込み順が大事: 依存されるものから先に読む(ES modulesは使わない方針) -->
+  <script src="js/storage.js"></script>
+  <script src="js/sensors.js"></script>
+  <script src="js/mock.js"></script>
+  <script src="js/analysis.js"></script>
+  <script src="js/recorder.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
