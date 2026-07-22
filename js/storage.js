@@ -61,6 +61,21 @@ const Storage2 = (() => {
     await tx('videos', 'readwrite', s => s.delete(id));
   }
 
+  // 動画を保存する({runId, blob, mime})
+  function saveVideo(video) { return tx('videos', 'readwrite', s => s.put(video)); }
+
+  // 動画を1件取得する(なければundefined)
+  function getVideo(runId) { return tx('videos', 'readonly', s => s.get(runId)); }
+
+  // 動画だけ削除する(センサーデータは残す。容量確保用)
+  function deleteVideo(runId) { return tx('videos', 'readwrite', s => s.delete(runId)); }
+
+  // 動画が存在する走行IDの一覧を返す(一覧画面でBlob本体を読み込まないため)
+  async function getVideoKeys() {
+    const keys = await tx('videos', 'readonly', s => s.getAllKeys());
+    return new Set(keys);
+  }
+
   // 全データを削除する
   async function wipeAll() {
     await tx('runs', 'readwrite', s => s.clear());
@@ -166,9 +181,16 @@ const Storage2 = (() => {
     download(blob, filename);
   }
 
+  // 走行の動画(.webm)をダウンロードする
+  function downloadVideo(run, blob) {
+    const filename = `run_${sanitizeFilename(run.name)}_${timestampForFile(run.createdAt)}.webm`;
+    download(blob, filename);
+  }
+
   return {
     open, saveRun, getRun, getAllRuns, deleteRun, wipeAll,
-    usageText, requestPersist, buildCsv, downloadCsv, download,
+    saveVideo, getVideo, deleteVideo, getVideoKeys,
+    usageText, requestPersist, buildCsv, downloadCsv, downloadVideo, download,
     APP_VERSION
   };
 })();

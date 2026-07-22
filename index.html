@@ -46,8 +46,9 @@
 
     <!-- ========== 記録画面 ========== -->
     <section id="screen-record" class="screen hidden">
-      <div id="camera-area" class="camera-placeholder">
-        <p>カメラプレビュー(フェーズ2で実装)</p>
+      <div id="camera-area" class="camera-box">
+        <video id="camera-preview" autoplay muted playsinline></video>
+        <p id="camera-msg" class="camera-msg">カメラ起動中…</p>
       </div>
 
       <!-- 記録前の操作 -->
@@ -85,6 +86,12 @@
 
       <div id="result-summary" class="summary-grid"></div>
 
+      <!-- 走行動画(グラフタップでその時刻にシークする) -->
+      <div id="result-video-box" class="video-box hidden">
+        <video id="result-video" controls playsinline></video>
+        <p class="hint">下の横Gグラフをタップすると、その時刻に動画がジャンプします。再生中はグラフ上に現在位置(白線)が動きます。</p>
+      </div>
+
       <div class="chart-box">
         <div class="chart-title">横G の時系列(黄線 = 計測区間: 最初〜最後の切り返し)</div>
         <canvas id="preview-chart" width="640" height="200"></canvas>
@@ -105,7 +112,7 @@
 
       <div class="row-buttons">
         <button id="btn-download-csv" class="btn btn-primary btn-large">CSVを保存</button>
-        <button id="btn-download-video" class="btn btn-large" disabled>動画を保存(フェーズ2)</button>
+        <button id="btn-download-video" class="btn btn-large" disabled>動画を保存</button>
       </div>
     </section>
 

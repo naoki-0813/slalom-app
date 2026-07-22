@@ -101,13 +101,33 @@ main { padding: 16px; max-width: 720px; margin: 0 auto; }
 .notice-list { padding-left: 20px; line-height: 1.9; margin-bottom: 20px; }
 
 /* ---------- 記録画面 ---------- */
-.camera-placeholder {
+.camera-box {
+  position: relative;
   background: #000;
   border-radius: 10px;
-  height: 160px;
-  display: flex; align-items: center; justify-content: center;
-  color: #667;
+  min-height: 120px;
   margin-bottom: 16px;
+  overflow: hidden;
+}
+.camera-box video {
+  display: block;
+  width: 100%;
+  max-height: 260px;
+  object-fit: cover;
+}
+.camera-msg {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: #9aa7b3; text-align: center; padding: 12px;
+  background: rgba(0,0,0,0.6);
+}
+
+.video-box { margin-bottom: 16px; }
+.video-box video {
+  display: block;
+  width: 100%;
+  border-radius: 10px;
+  background: #000;
 }
 #record-controls { display: flex; flex-direction: column; gap: 12px; }
 

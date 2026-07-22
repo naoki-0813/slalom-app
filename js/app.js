@@ -60,6 +60,9 @@ const App = (() => {
     // 記録中に画面を離れない(誤操作防止)
     if (Recorder.recording && name !== 'record') return;
 
+    // 記録画面を離れるときはカメラを止める(バッテリー・プライバシーのため)
+    if (currentScreen === 'record' && name !== 'record') Recorder.stopCamera();
+
     document.querySelectorAll('.screen').forEach(el => el.classList.add('hidden'));
     $(`screen-${name}`).classList.remove('hidden');
     $('header-title').textContent = TITLES[name];
@@ -96,6 +99,21 @@ const App = (() => {
     $('countdown-overlay').classList.add('hidden');
     updateCalibStatus();
     Sensors.startListening(); // キャリブレーションに備えてセンサー起動
+    startCameraPreview();
+  }
+
+  // カメラを起動してプレビューを表示する(使えなくても記録は続けられる)
+  async function startCameraPreview() {
+    const msg = $('camera-msg');
+    msg.classList.remove('hidden');
+    msg.textContent = 'カメラ起動中…';
+    try {
+      await Recorder.initCamera($('camera-preview'), settings.quality);
+      msg.classList.add('hidden');
+    } catch (e) {
+      msg.textContent = 'カメラを起動できませんでした(動画なしで記録できます)。' +
+        'Chromeの「設定 > サイトの設定 > カメラ」で許可を確認してください。';
+    }
   }
 
   function updateCalibStatus() {
@@ -175,6 +193,31 @@ const App = (() => {
     drawPreviewChart(run);
     drawSpeedDistChart(run);
     setupSectionSliders(run);
+    loadResultVideo(run);
+  }
+
+  // 結果画面に保存済み動画を読み込む(なければプレイヤーを隠す)
+  let resultVideoUrl = null;   // 前回のBlob URLを解放するために保持
+  let resultVideoBlob = null;  // 「動画を保存」用
+
+  async function loadResultVideo(run) {
+    const box = $('result-video-box');
+    const videoEl = $('result-video');
+    if (resultVideoUrl) { URL.revokeObjectURL(resultVideoUrl); resultVideoUrl = null; }
+    resultVideoBlob = null;
+    videoEl.removeAttribute('src');
+
+    const rec = (run.id !== undefined && run.id !== null) ? await Storage2.getVideo(run.id) : null;
+    if (rec && rec.blob && rec.blob.size > 0) {
+      resultVideoBlob = rec.blob;
+      resultVideoUrl = URL.createObjectURL(rec.blob);
+      videoEl.src = resultVideoUrl;
+      box.classList.remove('hidden');
+      $('btn-download-video').disabled = false;
+    } else {
+      box.classList.add('hidden');
+      $('btn-download-video').disabled = true;
+    }
   }
 
   // サマリー数値を計算して表示する
@@ -238,7 +281,8 @@ const App = (() => {
   }
 
   // 横Gの簡易チャートを自前のcanvasで描く(Chart.jsはフェーズ3で導入)
-  function drawPreviewChart(run) {
+  // cursorMsを渡すと、その時刻に白い縦線(動画の現在位置)を描く
+  function drawPreviewChart(run, cursorMs) {
     const canvas = $('preview-chart');
     const ctx = canvas.getContext('2d');
     const W = canvas.width, H = canvas.height;
@@ -280,6 +324,14 @@ const App = (() => {
       ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(xs, 0); ctx.lineTo(xs, H); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(xe, 0); ctx.lineTo(xe, H); ctx.stroke();
+    }
+
+    // 動画の現在位置カーソル(白線)
+    if (cursorMs !== undefined && cursorMs !== null) {
+      const xc = x(cursorMs);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(xc, 0); ctx.lineTo(xc, H); ctx.stroke();
     }
   }
 
@@ -350,6 +402,7 @@ const App = (() => {
 
   async function renderList() {
     const runs = await Storage2.getAllRuns();
+    const videoKeys = await Storage2.getVideoKeys(); // 動画があるrunのID一覧(Blobは読まない)
     const listEl = $('run-list');
     $('list-empty').classList.toggle('hidden', runs.length > 0);
     $('storage-usage').textContent = await Storage2.usageText();
@@ -362,12 +415,15 @@ const App = (() => {
       const dateStr = `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
       const sectionS = (run.sectionStartMs !== null && run.sectionEndMs !== null)
         ? ((run.sectionEndMs - run.sectionStartMs) / 1000).toFixed(1) + '秒' : '-';
+      const hasVideo = videoKeys.has(run.id);
       li.innerHTML = `
         <div class="run-title">${escapeHtml(run.name)}${run.isExpert ? '<span class="expert-badge">お手本</span>' : ''}</div>
-        <div class="run-sub">${dateStr} / タイム: ${sectionS} / ${run.samples.length}サンプル</div>
+        <div class="run-sub">${dateStr} / タイム: ${sectionS} / ${run.samples.length}サンプル${hasVideo ? ' / 🎥動画あり' : ''}</div>
         <div class="run-actions">
           <button class="btn act-detail">詳細</button>
           <button class="btn act-csv">CSV</button>
+          ${hasVideo ? '<button class="btn act-video">動画</button>' : ''}
+          ${hasVideo ? '<button class="btn act-del-video">動画だけ削除</button>' : ''}
           <button class="btn btn-danger act-delete">削除</button>
         </div>`;
       li.querySelector('.act-detail').addEventListener('click', () => {
@@ -376,6 +432,20 @@ const App = (() => {
         renderResult();
       });
       li.querySelector('.act-csv').addEventListener('click', () => Storage2.downloadCsv(run));
+      if (hasVideo) {
+        // 動画の再ダウンロード
+        li.querySelector('.act-video').addEventListener('click', async () => {
+          const rec = await Storage2.getVideo(run.id);
+          if (rec && rec.blob) Storage2.downloadVideo(run, rec.blob);
+        });
+        // 動画だけ削除(センサーデータは残す。容量確保用)
+        li.querySelector('.act-del-video').addEventListener('click', async () => {
+          if (confirm(`「${run.name}」の動画だけを削除します(センサーデータは残ります)。よろしいですか?`)) {
+            await Storage2.deleteVideo(run.id);
+            renderList();
+          }
+        });
+      }
       li.querySelector('.act-delete').addEventListener('click', async () => {
         if (confirm(`「${run.name}」を削除しますか?`)) {
           await Storage2.deleteRun(run.id);
@@ -416,10 +486,39 @@ const App = (() => {
     $('btn-download-csv').addEventListener('click', () => {
       if (currentRun) Storage2.downloadCsv(currentRun);
     });
+    $('btn-download-video').addEventListener('click', () => {
+      if (currentRun && resultVideoBlob) Storage2.downloadVideo(currentRun, resultVideoBlob);
+    });
+
+    // グラフタップ → 動画をその時刻にシーク(データと動画は同じ時刻基準)
+    $('preview-chart').addEventListener('click', (e) => {
+      const run = currentRun;
+      const videoEl = $('result-video');
+      if (!run || !run.samples.length || !videoEl.src) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const frac = (e.clientX - rect.left) / rect.width;
+      const tMs = frac * run.samples[run.samples.length - 1].tMs;
+      // 動画内時刻 = (センサー時刻 − 動画開始オフセット) / 1000
+      const offset = run.videoStartOffsetMs || 0;
+      videoEl.currentTime = Math.max(0, (tMs - offset) / 1000);
+    });
+
+    // 動画再生中 → グラフ上に現在位置の白線を動かす(双方向同期)
+    $('result-video').addEventListener('timeupdate', () => {
+      const run = currentRun;
+      if (!run || $('screen-result').classList.contains('hidden')) return;
+      const offset = run.videoStartOffsetMs || 0;
+      drawPreviewChart(run, $('result-video').currentTime * 1000 + offset);
+    });
 
     // 設定画面
     $('set-autostop').addEventListener('change', e => { settings.autoStop = e.target.checked; saveSettings(); });
-    $('set-quality').addEventListener('change', e => { settings.quality = e.target.value; saveSettings(); });
+    $('set-quality').addEventListener('change', e => {
+      settings.quality = e.target.value;
+      saveSettings();
+      // 記録画面でプレビュー中なら新しい画質でカメラを取り直す
+      if (currentScreen === 'record' && !Recorder.recording) startCameraPreview();
+    });
     $('set-mock').addEventListener('change', e => { settings.mock = e.target.checked; saveSettings(); });
     $('set-mock-preset').addEventListener('change', e => { settings.mockPreset = e.target.value; saveSettings(); });
     $('btn-wipe').addEventListener('click', async () => {
