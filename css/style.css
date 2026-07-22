@@ -248,3 +248,58 @@ main { padding: 16px; max-width: 720px; margin: 0 auto; }
 /* ---------- 設定 ---------- */
 .settings-list { display: flex; flex-direction: column; gap: 16px; }
 .settings-list label { display: flex; flex-direction: column; gap: 6px; color: #9aa7b3; }
+
+/* ---------- スマホ横向き(車載時の記録画面)最適化 ---------- */
+/* 高さが低い横長画面 = 車載の横置きスマホを想定。記録画面を
+   「左: カメラ+リアルタイム表示 / 右: 操作」の2カラムにし、スクロール無しで操作できるようにする */
+@media (orientation: landscape) and (max-height: 540px) {
+
+  #app-header { padding: 6px 12px; }
+  #header-title { font-size: 1rem; }
+  main { max-width: none; padding: 10px 12px; }
+
+  /* ホームは2×2のボタン配置 */
+  .home-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .home-buttons .btn-huge { padding: 18px; font-size: 1.2rem; }
+
+  /* 記録画面: 2カラム化 */
+  #screen-record {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    gap: 10px;
+    align-items: start;
+  }
+  #camera-area {
+    grid-column: 1;
+    grid-row: 1 / span 3;
+    margin-bottom: 0;
+    height: calc(100vh - 74px);   /* ヘッダー+余白ぶんを引いた高さいっぱい */
+  }
+  .camera-box video { max-height: none; height: 100%; }
+  #live-controls, #record-controls, #recording-view {
+    grid-column: 2;
+    margin: 0;
+  }
+  #record-controls, #recording-view {
+    max-height: calc(100vh - 74px);
+    overflow-y: auto;
+  }
+  #record-controls { gap: 8px; }
+  #record-controls .btn-huge { padding: 14px; font-size: 1.1rem; }
+  #record-controls .btn-large { padding: 12px; font-size: 1rem; }
+  #record-controls .hint { font-size: 0.75rem; margin-top: 0; }
+  .status-box { padding: 8px; margin: 4px 0; font-size: 0.9rem; }
+  #live-controls { padding: 8px; gap: 8px; font-size: 0.85rem; }
+
+  /* 記録中の表示をコンパクトに(停止ボタンがスクロール無しで押せること) */
+  #recording-view { padding-top: 0; }
+  .rec-indicator { font-size: 0.95rem; }
+  .rec-time { font-size: 1.3rem; margin: 4px 0 0; }
+  .rec-g-label { display: none; }   /* 横向きでは「横G」ラベルを省略(数値+リアルタイム表示で自明) */
+  .rec-g { font-size: 2.6rem; margin-bottom: 6px; }
+  #recording-view .btn-huge { padding: 14px; font-size: 1.15rem; }
+  #autostop-hint { font-size: 0.72rem; margin-top: 4px; }
+
+  /* 結果・比較画面のグラフは高さを抑えて1画面に入りやすく */
+  .chart-holder { height: 180px; }
+}
