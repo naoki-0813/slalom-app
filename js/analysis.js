@@ -215,5 +215,208 @@ const Analysis = (() => {
     return bins;
   }
 
-  return { detectSection, fusedSpeed, computeMetrics, perSecondSpeedStats, estimateRateHz, movingAvg };
+  // ---------- グラフ・比較用の時系列 ----------
+
+  // 記録全体の平滑化済み時系列を返す(結果画面のグラフ用)
+  // 戻り値: { tS(秒), ayG(横G), gz(deg/s), vKmh } すべて同じ長さの配列
+  function displaySeries(run) {
+    const samples = run.samples;
+    if (!samples.length) return null;
+    const win = Math.max(3, Math.round(0.1 * estimateRateHz(samples)));
+    const aySm = movingAvg(samples.map(s => s.ay), win);
+    const gzSm = movingAvg(samples.map(s => s.gz), win);
+    const speed = fusedSpeed(samples, run.gps);
+    return {
+      tS: samples.map(s => s.tMs / 1000),
+      ayG: aySm.map(v => v / 9.81),
+      gz: gzSm,
+      vKmh: speed.map(v => v * 3.6)
+    };
+  }
+
+  // 計測区間内だけの時系列を返す(比較画面用)。tSは区間開始からの相対秒
+  function sectionSeries(run) {
+    const samples = run.samples;
+    if (!samples.length) return null;
+    const s0 = run.sectionStartMs ?? samples[0].tMs;
+    const s1 = run.sectionEndMs ?? samples[samples.length - 1].tMs;
+    const win = Math.max(3, Math.round(0.1 * estimateRateHz(samples)));
+    const aySm = movingAvg(samples.map(s => s.ay), win);
+    const gzSm = movingAvg(samples.map(s => s.gz), win);
+    const speed = fusedSpeed(samples, run.gps);
+    const tS = [], ay = [], gz = [], v = [];
+    for (let i = 0; i < samples.length; i++) {
+      if (samples[i].tMs >= s0 && samples[i].tMs <= s1) {
+        tS.push((samples[i].tMs - s0) / 1000);
+        ay.push(aySm[i]);
+        gz.push(gzSm[i]);
+        v.push(speed[i]);
+      }
+    }
+    if (tS.length < 10) return null;
+    return { tS, ay, gz, v, timeS: tS[tS.length - 1] };
+  }
+
+  // 時系列を「進行率0〜100%」のn点に線形補間でリサンプリングする
+  function resampleN(tS, ys, n) {
+    const T = tS[tS.length - 1];
+    const out = new Array(n);
+    let idx = 0;
+    for (let k = 0; k < n; k++) {
+      const tt = (k / (n - 1)) * T;
+      while (idx < tS.length - 2 && tS[idx + 1] < tt) idx++;
+      const t0 = tS[idx], t1 = tS[idx + 1];
+      const f = t1 > t0 ? (tt - t0) / (t1 - t0) : 0;
+      out[k] = ys[idx] + (ys[idx + 1] - ys[idx]) * f;
+    }
+    return out;
+  }
+
+  // 走行の計測区間を200点の進行率配列にする(比較・スコア計算の共通土俵)
+  const N_RESAMPLE = 200;
+  function progress200(run) {
+    const ss = sectionSeries(run);
+    if (!ss) return null;
+    return {
+      ay: resampleN(ss.tS, ss.ay, N_RESAMPLE),
+      gz: resampleN(ss.tS, ss.gz, N_RESAMPLE),
+      v: resampleN(ss.tS, ss.v, N_RESAMPLE),
+      timeS: ss.timeS
+    };
+  }
+
+  // ---------- お手本比較・再現性スコア ----------
+
+  const K2 = 1.0;   // 一致度スコアのRMSE減衰定数 [m/s²] 調整対象
+  const K3 = 0.8;   // 再現性スコアの減衰定数 [m/s²] 調整対象
+
+  function rmseArr(a, b) {
+    let s = 0;
+    for (let i = 0; i < a.length; i++) s += (a[i] - b[i]) * (a[i] - b[i]);
+    return Math.sqrt(s / a.length);
+  }
+
+  // ピアソン相関係数(波形の形の一致度)
+  function pearson(a, b) {
+    const ma = mean(a), mb = mean(b);
+    let num = 0, da = 0, db = 0;
+    for (let i = 0; i < a.length; i++) {
+      num += (a[i] - ma) * (b[i] - mb);
+      da += (a[i] - ma) ** 2;
+      db += (b[i] - mb) ** 2;
+    }
+    const d = Math.sqrt(da * db);
+    return d > 0 ? num / d : 0;
+  }
+
+  // ヨーレートのゼロクロス位置(進行率%)の一覧。±3deg/sのデッドバンド付き
+  function zeroCrossPct(gzArr) {
+    const out = [];
+    let sign = 0;
+    for (let i = 0; i < gzArr.length; i++) {
+      if (gzArr[i] > YAW_DEADBAND) {
+        if (sign === -1) out.push(i / (gzArr.length - 1) * 100);
+        sign = 1;
+      } else if (gzArr[i] < -YAW_DEADBAND) {
+        if (sign === 1) out.push(i / (gzArr.length - 1) * 100);
+        sign = -1;
+      }
+    }
+    return out;
+  }
+
+  // 基準走行(お手本)との比較。戻り値の各値は「対象 − 基準」
+  function compareToBase(baseRun, run) {
+    const A = progress200(baseRun), B = progress200(run);
+    if (!A || !B) return null;
+    const mA = computeMetrics(baseRun), mB = computeMetrics(run);
+
+    const rmseLatG = rmseArr(A.ay, B.ay);
+    const rmseYaw = rmseArr(A.gz, B.gz);
+    // 一致度 = 相関(形)とRMSE(大きさ)の平均
+    const matchScore = Math.round(
+      (100 * Math.max(0, pearson(A.ay, B.ay)) + 100 * Math.exp(-rmseLatG / K2)) / 2
+    );
+
+    // 切り返しタイミングのずれ: ゼロクロス位置を順に対応付けて平均(+ = お手本より遅い)
+    const zA = zeroCrossPct(A.gz), zB = zeroCrossPct(B.gz);
+    const nz = Math.min(zA.length, zB.length);
+    let timingShiftPct = null;
+    if (nz > 0) {
+      let s = 0;
+      for (let i = 0; i < nz; i++) s += zB[i] - zA[i];
+      timingShiftPct = s / nz;
+    }
+
+    return {
+      rmseLatG, rmseYaw, matchScore, timingShiftPct,
+      timeDiffS: B.timeS - A.timeS,
+      maxLatGDiff: (mB.maxLatG || 0) - (mA.maxLatG || 0),
+      smoothnessDiff: (mB.smoothness || 0) - (mA.smoothness || 0)
+    };
+  }
+
+  // 再現性(自分の走行同士)。横G波形の各進行率点での標準偏差から算出
+  function reproducibility(runs) {
+    const Ps = runs.map(progress200).filter(p => p !== null);
+    if (Ps.length < 2) return null;
+    const n = N_RESAMPLE;
+    const meanCurve = new Array(n), sdCurve = new Array(n);
+    for (let k = 0; k < n; k++) {
+      const vals = Ps.map(p => p.ay[k]);
+      meanCurve[k] = mean(vals);
+      sdCurve[k] = std(vals);
+    }
+    const meanSd = mean(sdCurve);
+    const times = Ps.map(p => p.timeS);
+    const timeCvPct = mean(times) > 0 ? std(times) / mean(times) * 100 : 0;
+    return {
+      score: Math.round(100 * Math.exp(-meanSd / K3)),
+      meanSd, meanCurve, sdCurve, timeCvPct
+    };
+  }
+
+  // 講評コメントの生成(if文ベース。AIは使わない)
+  function adviceComments(mode, data) {
+    const out = [];
+    if (mode === 'expert') {
+      // data = [{name, cmp}] お手本と各走行の比較結果
+      for (const { name, cmp } of data) {
+        if (!cmp) continue;
+        const c = [];
+        if (cmp.timingShiftPct !== null && cmp.timingShiftPct > 3) {
+          c.push('切り返しがお手本より遅れがちです。次のパイロンを早めに見ましょう');
+        }
+        if (cmp.timingShiftPct !== null && cmp.timingShiftPct < -3) {
+          c.push('切り返しがお手本より早めです。舵を入れるのを少し我慢してみましょう');
+        }
+        if (cmp.rmseLatG > K2 * 0.8 && Math.abs(cmp.maxLatGDiff) < 0.1) {
+          c.push('Gの出し方の波形がお手本と違います。舵の当て方が急かもしれません');
+        }
+        if (cmp.smoothnessDiff < -15) {
+          c.push('操作が急です。ハンドルをより滑らかに動かしましょう');
+        }
+        if (c.length === 0 && cmp.matchScore >= 70) {
+          c.push('お手本にかなり近い走りです');
+        }
+        if (c.length === 0) {
+          c.push('波形の重なりをグラフで確認してみましょう');
+        }
+        out.push(`【${name}】` + c.join('。'));
+      }
+    } else {
+      // data = reproducibility() の戻り値
+      if (data.score >= 80) out.push('走行間のばらつきが小さく、非常に安定しています');
+      else if (data.score >= 60) out.push('まずまず安定しています。ばらつきの大きい区間(帯が太い所)を意識してみましょう');
+      else out.push('走行ごとのばらつきが大きめです。同じ速度・同じラインを意識して再現性を高めましょう');
+      if (data.timeCvPct > 5) out.push(`タイムのばらつきも大きめです(変動 ${data.timeCvPct.toFixed(1)}%)`);
+    }
+    return out;
+  }
+
+  return {
+    detectSection, fusedSpeed, computeMetrics, perSecondSpeedStats, estimateRateHz, movingAvg,
+    displaySeries, sectionSeries, progress200,
+    compareToBase, reproducibility, adviceComments
+  };
 })();

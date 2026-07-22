@@ -48,7 +48,38 @@
     <section id="screen-record" class="screen hidden">
       <div id="camera-area" class="camera-box">
         <video id="camera-preview" autoplay muted playsinline></video>
+        <canvas id="live-overlay"></canvas>
         <p id="camera-msg" class="camera-msg">カメラ起動中…</p>
+      </div>
+
+      <!-- カメラ映像に重ねるリアルタイムグラフの設定 -->
+      <div class="chart-toggles" id="live-controls">
+        <label>表示
+          <select id="live-item">
+            <option value="none">なし</option>
+            <option value="latg">横G</option>
+            <option value="yaw">ヨーレート</option>
+            <option value="speed">速度</option>
+          </select>
+        </label>
+        <label>時間幅
+          <select id="live-window">
+            <option value="5">5秒</option>
+            <option value="10">10秒</option>
+            <option value="20">20秒</option>
+            <option value="30">30秒</option>
+          </select>
+        </label>
+        <label>縦軸
+          <select id="live-ymode">
+            <option value="auto">Auto</option>
+            <option value="fixed">固定</option>
+          </select>
+        </label>
+        <label id="live-yfixed-wrap" class="hidden">±
+          <input type="number" id="live-yfixed" step="0.1" min="0.1" class="num-input">
+          <span id="live-yunit"></span>
+        </label>
       </div>
 
       <!-- 記録前の操作 -->
@@ -56,7 +87,7 @@
         <div id="calib-status" class="status-box">キャリブレーション: 未実施</div>
         <button id="btn-calibrate" class="btn btn-large">キャリブレーション(停車状態で3秒)</button>
         <button id="btn-start" class="btn btn-primary btn-huge" disabled>記録開始(5秒カウントダウン)</button>
-        <p class="hint">スマホを固定し、平らな場所に停車した状態でキャリブレーションしてください。横持ちを推奨します。</p>
+        <p class="hint">置き方: スマホは<strong>横置き</strong>で、<strong>画面を運転者側</strong>・背面カメラが前方を向くように<strong>立て気味に固定</strong>してください(寝かせ置きは向きの推定が不正確になります)。平らな場所に停車した状態でキャリブレーションします。多少の傾きはキャリブレーションで自動補正されます。</p>
       </div>
 
       <!-- カウントダウン表示 -->
@@ -92,9 +123,26 @@
         <p class="hint">下の横Gグラフをタップすると、その時刻に動画がジャンプします。再生中はグラフ上に現在位置(白線)が動きます。</p>
       </div>
 
-      <div class="chart-box">
-        <div class="chart-title">横G の時系列(黄線 = 計測区間: 最初〜最後の切り返し)</div>
-        <canvas id="preview-chart" width="640" height="200"></canvas>
+      <!-- 表示項目の切り替え(既定は設定画面の「デフォルト表示項目」) -->
+      <div class="chart-toggles" id="result-toggles">
+        表示:
+        <label><input type="checkbox" id="tg-latg"> 横G</label>
+        <label><input type="checkbox" id="tg-yaw"> ヨーレート</label>
+        <label><input type="checkbox" id="tg-speed"> 速度</label>
+        <label><input type="checkbox" id="tg-dist"> 速度分布</label>
+      </div>
+
+      <div id="box-latg" class="chart-box">
+        <div class="chart-title">横G [G](タップで動画シーク / 黄線 = 計測区間)</div>
+        <div class="chart-holder"><canvas id="chart-latg"></canvas></div>
+      </div>
+      <div id="box-yaw" class="chart-box">
+        <div class="chart-title">ヨーレート [deg/s]</div>
+        <div class="chart-holder"><canvas id="chart-yaw"></canvas></div>
+      </div>
+      <div id="box-speed" class="chart-box">
+        <div class="chart-title">速度 [km/h](加速度+GPSからの推定値)</div>
+        <div class="chart-holder"><canvas id="chart-speed"></canvas></div>
       </div>
 
       <!-- 計測区間の手動調整(自動検出がずれたときの保険) -->
@@ -104,7 +152,7 @@
         <button id="btn-sec-auto" class="btn">自動検出に戻す</button>
       </div>
 
-      <div class="chart-box">
+      <div id="box-dist" class="chart-box">
         <div class="chart-title">速度の1秒ごとの分布(計測区間内)</div>
         <canvas id="speed-dist-chart" width="640" height="220"></canvas>
         <p class="hint">箱 = 中央50%の範囲、縦線 = 最小〜最大、横線 = 中央値。箱が細く高さが揃っているほど速度が一定です。速度は前後加速度の積分をGPSで補正した推定値です。</p>
@@ -123,11 +171,34 @@
       <p id="list-empty" class="hint hidden">保存された走行はまだありません。</p>
     </section>
 
-    <!-- ========== 比較画面(フェーズ3で実装) ========== -->
+    <!-- ========== 比較画面 ========== -->
     <section id="screen-compare" class="screen hidden">
-      <div class="placeholder-box">
-        <p>比較機能(お手本比較・再現性チェック)はフェーズ3で実装します。</p>
-        <p class="hint">先に走行データを2本以上記録・保存しておくと、実装後すぐに試せます。</p>
+      <p class="hint">比較する走行を2〜5本選んでください。「お手本」フラグ付きの走行が含まれる場合はお手本比較、なければ再現性チェックになります。</p>
+      <ul id="compare-run-list" class="run-list"></ul>
+      <p id="compare-empty" class="hint hidden">走行データが2本未満です。先に記録・保存してください。</p>
+      <button id="btn-run-compare" class="btn btn-primary btn-large">選んだ走行を比較する</button>
+
+      <div id="compare-view" class="hidden">
+        <div class="status-box" id="compare-mode-label"></div>
+        <div class="chart-toggles">
+          横軸:
+          <label><input type="radio" name="cmp-axis" value="time" checked> 開始地点合わせ(秒)</label>
+          <label><input type="radio" name="cmp-axis" value="progress"> 進行率(0〜100%)</label>
+        </div>
+        <div class="chart-box">
+          <div class="chart-title">横G [G]</div>
+          <div class="chart-holder"><canvas id="cmp-latg"></canvas></div>
+        </div>
+        <div class="chart-box">
+          <div class="chart-title">ヨーレート [deg/s]</div>
+          <div class="chart-holder"><canvas id="cmp-yaw"></canvas></div>
+        </div>
+        <div class="chart-box">
+          <div class="chart-title">速度 [km/h]</div>
+          <div class="chart-holder"><canvas id="cmp-speed"></canvas></div>
+        </div>
+        <div id="compare-scores"></div>
+        <div id="compare-comment" class="status-box hidden"></div>
       </div>
     </section>
 
@@ -152,18 +223,31 @@
             <option value="wobble">ばらつきの大きい走行</option>
           </select>
         </label>
+        <div class="status-box">
+          <div class="chart-title">結果画面にデフォルトで表示する項目</div>
+          <label class="check-label"><input type="checkbox" id="set-chart-latg"> 横G</label>
+          <label class="check-label"><input type="checkbox" id="set-chart-yaw"> ヨーレート</label>
+          <label class="check-label"><input type="checkbox" id="set-chart-speed"> 速度</label>
+          <label class="check-label"><input type="checkbox" id="set-chart-dist"> 速度分布</label>
+        </div>
         <div class="status-box" id="sensor-rate">記録レート: -</div>
+        <button id="btn-demo-data" class="btn">デモデータを作成(お手本1本+練習2本)</button>
+        <p class="hint">記録しなくても結果画面・比較画面を試せるサンプル走行を保存します。不要になったら走行一覧から削除できます。</p>
         <button id="btn-wipe" class="btn btn-danger">データを全削除</button>
       </div>
     </section>
 
   </main>
 
+  <!-- グラフ描画ライブラリ(Chart.js)。オフライン時はグラフのみ表示されない(記録・保存は可能) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
   <!-- 読み込み順が大事: 依存されるものから先に読む(ES modulesは使わない方針) -->
   <script src="js/storage.js"></script>
   <script src="js/sensors.js"></script>
   <script src="js/mock.js"></script>
   <script src="js/analysis.js"></script>
+  <script src="js/charts.js"></script>
   <script src="js/recorder.js"></script>
   <script src="js/app.js"></script>
 </body>

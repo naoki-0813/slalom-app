@@ -122,6 +122,19 @@ main { padding: 16px; max-width: 720px; margin: 0 auto; }
   background: rgba(0,0,0,0.6);
 }
 
+/* カメラ映像に重ねるリアルタイムグラフ(タップは映像側に通す) */
+#live-overlay {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+}
+#live-controls { margin: 0 0 16px; }
+.num-input {
+  width: 72px;
+  background: #232b34; border: 1px solid #3a444f; border-radius: 8px;
+  color: #e8ecf0; padding: 6px 8px; font-size: 1rem;
+}
+
 .video-box { margin-bottom: 16px; }
 .video-box video {
   display: block;
@@ -171,6 +184,37 @@ main { padding: 16px; max-width: 720px; margin: 0 auto; }
 
 .chart-box { margin-top: 16px; }
 #speed-dist-chart { width: 100%; background: #1a2027; border-radius: 10px; }
+
+/* Chart.js用のグラフ枠(高さ固定・レスポンシブ) */
+.chart-holder {
+  position: relative;
+  height: 220px;
+  background: #1a2027;
+  border-radius: 10px;
+  padding: 6px;
+}
+
+/* グラフ表示項目・横軸の切り替え */
+.chart-toggles {
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+  background: #1a2027; border: 1px solid #2a323c; border-radius: 10px;
+  padding: 10px 12px; margin-top: 16px;
+  color: #9aa7b3; font-size: 0.9rem;
+}
+.chart-toggles label {
+  display: flex; align-items: center; gap: 6px; color: #e8ecf0;
+}
+
+/* 比較画面 */
+.cmp-row { padding: 2px 0; }
+.cmp-row .run-sub { display: block; }
+.score-table {
+  width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 0.85rem;
+}
+.score-table th, .score-table td {
+  border: 1px solid #2a323c; padding: 8px 6px; text-align: center;
+}
+.score-table th { background: #1a2027; color: #9aa7b3; font-weight: 600; }
 
 /* 計測区間の手動調整 */
 .section-adjust {

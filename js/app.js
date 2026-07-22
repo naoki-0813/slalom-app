@@ -25,7 +25,16 @@ const App = (() => {
     autoStop: true,
     quality: '720',
     mock: false,
-    mockPreset: 'expert'
+    mockPreset: 'expert',
+    // 結果画面にデフォルトで表示するグラフ項目
+    charts: { latg: true, yaw: true, speed: true, dist: true },
+    // カメラ映像に重ねるリアルタイムグラフ
+    live: {
+      item: 'latg',                                 // none | latg | yaw | speed
+      windowS: 10,                                  // 横軸の時間幅 [秒]
+      yMode: 'auto',                                // auto | fixed
+      yFixedBy: { latg: 0.6, yaw: 40, speed: 60 }   // 固定時のレンジ(項目ごと)
+    }
   };
 
   function loadSettings() {
@@ -52,6 +61,14 @@ const App = (() => {
     $('set-quality').value = settings.quality;
     $('set-mock').checked = settings.mock;
     $('set-mock-preset').value = settings.mockPreset;
+    $('set-chart-latg').checked = settings.charts.latg;
+    $('set-chart-yaw').checked = settings.charts.yaw;
+    $('set-chart-speed').checked = settings.charts.speed;
+    $('set-chart-dist').checked = settings.charts.dist;
+    $('live-item').value = settings.live.item;
+    $('live-window').value = String(settings.live.windowS);
+    $('live-ymode').value = settings.live.yMode;
+    updateLiveControlsUI();
   }
 
   // ---------- 画面切り替え ----------
@@ -60,8 +77,12 @@ const App = (() => {
     // 記録中に画面を離れない(誤操作防止)
     if (Recorder.recording && name !== 'record') return;
 
-    // 記録画面を離れるときはカメラを止める(バッテリー・プライバシーのため)
-    if (currentScreen === 'record' && name !== 'record') Recorder.stopCamera();
+    // 記録画面を離れるときはカメラ・GPS・ライブ表示を止める(バッテリー・プライバシーのため)
+    if (currentScreen === 'record' && name !== 'record') {
+      Recorder.stopCamera();
+      stopLiveOverlay();
+      Sensors.stopGps();
+    }
 
     document.querySelectorAll('.screen').forEach(el => el.classList.add('hidden'));
     $(`screen-${name}`).classList.remove('hidden');
@@ -74,6 +95,7 @@ const App = (() => {
     }
     if (name === 'record') enterRecordScreen();
     if (name === 'list') renderList();
+    if (name === 'compare') renderCompareSelect();
     if (name === 'settings') {
       $('sensor-rate').textContent = `記録レート: ${Sensors.measuredRateHz || '-'} Hz(記録中に実測)`;
     }
@@ -99,7 +121,81 @@ const App = (() => {
     $('countdown-overlay').classList.add('hidden');
     updateCalibStatus();
     Sensors.startListening(); // キャリブレーションに備えてセンサー起動
+    Sensors.startGps();       // リアルタイム速度表示のため早めに起動(権限確認も早めに済む)
     startCameraPreview();
+    startLiveOverlay();
+  }
+
+  // ---------- カメラ映像に重ねるリアルタイムグラフ ----------
+
+  let liveChart = null;
+  let liveTimer = null;
+  let liveLastGpsKmh = 0;
+
+  // 項目ごとの設定: 単位・0中央か・値の取り出し方
+  const LIVE_CFG = {
+    latg: { unit: 'G', zeroCenter: true, decimals: 2, autoFloor: 0.2,
+            val: s => s.accVeh ? s.accVeh[1] / 9.81 : null },
+    yaw: { unit: 'deg/s', zeroCenter: true, decimals: 0, autoFloor: 10,
+           val: s => s.rotVeh ? s.rotVeh[2] : null },
+    speed: { unit: 'km/h', zeroCenter: false, decimals: 0, autoFloor: 10,
+             val: () => liveLastGpsKmh }
+  };
+
+  function liveOnMotion(sample) {
+    const cfg = LIVE_CFG[settings.live.item];
+    if (!cfg || !liveChart) return;
+    const v = cfg.val(sample);
+    if (v !== null) liveChart.push(sample.tMs, v);
+  }
+
+  function liveOnGps(gp) {
+    if (gp.speedMps !== null && gp.speedMps !== undefined) liveLastGpsKmh = gp.speedMps * 3.6;
+  }
+
+  // 設定値をライブチャートに反映する
+  function applyLiveOptions() {
+    const cfg = LIVE_CFG[settings.live.item];
+    if (!liveChart) return;
+    if (!cfg) { liveChart.clear(); return; }
+    liveChart.clear();
+    liveChart.setOptions({
+      windowS: +settings.live.windowS,
+      yMode: settings.live.yMode,
+      yFixed: +settings.live.yFixedBy[settings.live.item],
+      unit: cfg.unit, zeroCenter: cfg.zeroCenter,
+      decimals: cfg.decimals, autoFloor: cfg.autoFloor
+    });
+  }
+
+  // 記録画面に入ったら開始、離れたら停止
+  function startLiveOverlay() {
+    if (!liveChart) liveChart = Charts.makeLive($('live-overlay'));
+    applyLiveOptions();
+    Sensors.subscribeMotion(liveOnMotion);
+    Sensors.subscribeGps(liveOnGps);
+    if (liveTimer) clearInterval(liveTimer);
+    liveTimer = setInterval(() => {
+      if (settings.live.item !== 'none') liveChart.draw();
+    }, 100);
+  }
+
+  function stopLiveOverlay() {
+    Sensors.unsubscribeMotion(liveOnMotion);
+    Sensors.unsubscribeGps(liveOnGps);
+    if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+    if (liveChart) liveChart.clear();
+  }
+
+  // 縦軸「固定」のときだけ数値入力を見せる。単位ラベルも項目に合わせる
+  function updateLiveControlsUI() {
+    const item = settings.live.item;
+    const cfg = LIVE_CFG[item];
+    $('live-yfixed-wrap').classList.toggle('hidden', settings.live.yMode !== 'fixed' || !cfg);
+    if (cfg) {
+      $('live-yfixed').value = settings.live.yFixedBy[item];
+      $('live-yunit').textContent = cfg.unit;
+    }
   }
 
   // カメラを起動してプレビューを表示する(使えなくても記録は続けられる)
@@ -190,7 +286,13 @@ const App = (() => {
     }
 
     renderSummary(run);
-    drawPreviewChart(run);
+    // 表示項目の初期状態は設定画面の「デフォルト表示項目」から
+    $('tg-latg').checked = settings.charts.latg;
+    $('tg-yaw').checked = settings.charts.yaw;
+    $('tg-speed').checked = settings.charts.speed;
+    $('tg-dist').checked = settings.charts.dist;
+    applyChartToggles();
+    renderResultCharts(run);
     drawSpeedDistChart(run);
     setupSectionSliders(run);
     loadResultVideo(run);
@@ -276,63 +378,59 @@ const App = (() => {
     Storage2.saveRun(run);
     updateSectionLabels(run);
     renderSummary(run);
-    drawPreviewChart(run);
+    updateResultOverlays(run);
     drawSpeedDistChart(run);
   }
 
-  // 横Gの簡易チャートを自前のcanvasで描く(Chart.jsはフェーズ3で導入)
-  // cursorMsを渡すと、その時刻に白い縦線(動画の現在位置)を描く
-  function drawPreviewChart(run, cursorMs) {
-    const canvas = $('preview-chart');
-    const ctx = canvas.getContext('2d');
-    const W = canvas.width, H = canvas.height;
-    ctx.clearRect(0, 0, W, H);
-    if (!run.samples.length) return;
+  // ---------- 結果画面の時系列グラフ(Chart.js) ----------
 
-    // 描画用に最大600点へ間引く(データ本体は間引かない)
-    const step = Math.max(1, Math.floor(run.samples.length / 600));
-    const pts = [];
-    for (let i = 0; i < run.samples.length; i += step) pts.push(run.samples[i]);
+  const resultCharts = { latg: null, yaw: null, speed: null };
 
-    const tMax = pts[pts.length - 1].tMs || 1;
-    const gLimit = 0.6 * 9.81; // 表示レンジ ±0.6G
-    const x = (t) => t / tMax * W;
-    const y = (ay) => H / 2 - (ay / gLimit) * (H / 2 - 10);
+  // グラフタップ → 動画をその時刻にシークする共通処理
+  function seekVideoToSeconds(xS) {
+    const run = currentRun;
+    const videoEl = $('result-video');
+    if (!run || !videoEl.src) return;
+    const offset = run.videoStartOffsetMs || 0;
+    videoEl.currentTime = Math.max(0, (xS * 1000 - offset) / 1000);
+  }
 
-    // 0Gの基準線
-    ctx.strokeStyle = '#3a444f';
-    ctx.beginPath(); ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2); ctx.stroke();
+  // 結果画面の3つのチャートを初回だけ生成する
+  function ensureResultCharts() {
+    if (!Charts.available() || resultCharts.latg) return;
+    resultCharts.latg = Charts.makeLine('chart-latg', { xLabel: '時間 [秒]', yLabel: 'G', onClickX: seekVideoToSeconds });
+    resultCharts.yaw = Charts.makeLine('chart-yaw', { xLabel: '時間 [秒]', yLabel: 'deg/s', onClickX: seekVideoToSeconds });
+    resultCharts.speed = Charts.makeLine('chart-speed', { xLabel: '時間 [秒]', yLabel: 'km/h', onClickX: seekVideoToSeconds });
+  }
 
-    // 横Gの波形
-    ctx.strokeStyle = '#4fc3f7';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    pts.forEach((s, i) => {
-      if (i === 0) ctx.moveTo(x(s.tMs), y(s.ay));
-      else ctx.lineTo(x(s.tMs), y(s.ay));
-    });
-    ctx.stroke();
+  // 走行データを3つのチャートに流し込む
+  function renderResultCharts(run) {
+    ensureResultCharts();
+    if (!Charts.available()) return; // オフライン等でChart.jsが無い場合はスキップ
+    const ds = Analysis.displaySeries(run);
+    if (!ds) return;
+    const toPoints = (ys) => ds.tS.map((t, i) => ({ x: t, y: ys[i] }));
+    Charts.setSingleSeries(resultCharts.latg, toPoints(ds.ayG));
+    Charts.setSingleSeries(resultCharts.yaw, toPoints(ds.gz));
+    Charts.setSingleSeries(resultCharts.speed, toPoints(ds.vKmh));
+    updateResultOverlays(run);
+  }
 
-    // 計測区間の外側を暗くし、境界に黄線マーカーを引く
-    if (run.sectionStartMs !== null && run.sectionStartMs !== undefined &&
-        run.sectionEndMs !== null && run.sectionEndMs !== undefined) {
-      const xs = x(run.sectionStartMs), xe = x(run.sectionEndMs);
-      ctx.fillStyle = 'rgba(0,0,0,0.45)';
-      ctx.fillRect(0, 0, xs, H);
-      ctx.fillRect(xe, 0, W - xe, H);
-      ctx.strokeStyle = '#ffd54f';
-      ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(xs, 0); ctx.lineTo(xs, H); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(xe, 0); ctx.lineTo(xe, H); ctx.stroke();
+  // 計測区間(黄線)と動画カーソルをチャートに反映する
+  function updateResultOverlays(run, cursorS) {
+    const startS = (run.sectionStartMs ?? null) !== null ? run.sectionStartMs / 1000 : null;
+    const endS = (run.sectionEndMs ?? null) !== null ? run.sectionEndMs / 1000 : null;
+    for (const key of ['latg', 'yaw', 'speed']) {
+      Charts.setOverlay(resultCharts[key], { startS, endS, cursorS: cursorS ?? null });
     }
+  }
 
-    // 動画の現在位置カーソル(白線)
-    if (cursorMs !== undefined && cursorMs !== null) {
-      const xc = x(cursorMs);
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(xc, 0); ctx.lineTo(xc, H); ctx.stroke();
-    }
+  // 表示項目チェックボックスの状態でグラフの表示/非表示を切り替える
+  function applyChartToggles() {
+    $('box-latg').classList.toggle('hidden', !$('tg-latg').checked);
+    $('box-yaw').classList.toggle('hidden', !$('tg-yaw').checked);
+    $('box-speed').classList.toggle('hidden', !$('tg-speed').checked);
+    $('box-dist').classList.toggle('hidden', !$('tg-dist').checked);
   }
 
   // 速度の1秒ごとの分布を箱ひげ図で描く(速度一定性の見える化)
@@ -456,6 +554,179 @@ const App = (() => {
     }
   }
 
+  // ---------- 比較画面 ----------
+
+  let compareRunsCache = [];   // 比較画面を開いたときの走行一覧
+  let currentCompare = null;   // { runs, baseRun, mode } 比較実行中の状態
+  const cmpCharts = { latg: null, yaw: null, speed: null };
+
+  // 走行の選択リストを描画する
+  async function renderCompareSelect() {
+    compareRunsCache = await Storage2.getAllRuns();
+    const listEl = $('compare-run-list');
+    const enough = compareRunsCache.length >= 2;
+    $('compare-empty').classList.toggle('hidden', enough);
+    $('btn-run-compare').disabled = !enough;
+    $('compare-view').classList.add('hidden');
+    currentCompare = null;
+
+    listEl.innerHTML = '';
+    for (const run of compareRunsCache) {
+      const d = new Date(run.createdAt);
+      const dateStr = `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      const li = document.createElement('li');
+      li.className = 'run-item';
+      li.innerHTML = `
+        <label class="check-label cmp-row">
+          <input type="checkbox" class="cmp-check" data-id="${run.id}">
+          <span>${escapeHtml(run.name)}${run.isExpert ? '<span class="expert-badge">お手本</span>' : ''}
+            <span class="run-sub">${dateStr}</span></span>
+        </label>`;
+      listEl.appendChild(li);
+    }
+  }
+
+  function ensureCmpCharts() {
+    if (!Charts.available() || cmpCharts.latg) return;
+    cmpCharts.latg = Charts.makeLine('cmp-latg', { yLabel: 'G', legend: true });
+    cmpCharts.yaw = Charts.makeLine('cmp-yaw', { yLabel: 'deg/s', legend: false });
+    cmpCharts.speed = Charts.makeLine('cmp-speed', { yLabel: 'km/h', legend: false });
+  }
+
+  // 「比較する」ボタン: 選択を検証し、モードを決めて描画する
+  function runCompare() {
+    const ids = [...document.querySelectorAll('.cmp-check:checked')].map(c => +c.dataset.id);
+    if (ids.length < 2 || ids.length > 5) {
+      alert('比較する走行を2〜5本選んでください。');
+      return;
+    }
+    const runs = compareRunsCache.filter(r => ids.includes(r.id));
+
+    // 旧データは計測区間を自動検出してから比較する
+    for (const r of runs) {
+      if (r.sectionStartMs === null || r.sectionStartMs === undefined) {
+        const det = Analysis.detectSection(r.samples);
+        if (det) { r.sectionStartMs = det.startMs; r.sectionEndMs = det.endMs; }
+      }
+    }
+
+    // お手本フラグ付きが含まれればお手本比較、なければ再現性チェック
+    const experts = runs.filter(r => r.isExpert);
+    const mode = experts.length > 0 ? 'expert' : 'repro';
+    const baseRun = mode === 'expert' ? experts[0] : runs[0];
+    currentCompare = { runs, baseRun, mode };
+
+    $('compare-view').classList.remove('hidden');
+    $('compare-mode-label').textContent = mode === 'expert'
+      ? `モードA: お手本と比較(基準 = ${baseRun.name}、太線で表示)`
+      : 'モードB: 再現性チェック(選んだ走行同士のばらつきを見る)';
+    drawCompare();
+    renderCompareScores();
+  }
+
+  // 重ね合わせグラフを描く(横軸: 開始地点合わせの秒 / 進行率%)
+  function drawCompare() {
+    ensureCmpCharts();
+    if (!Charts.available() || !currentCompare) return;
+    const axis = document.querySelector('input[name="cmp-axis"]:checked').value;
+    const { runs, baseRun, mode } = currentCompare;
+    const xLabel = axis === 'time' ? '計測開始からの時間 [秒]' : '進行率 [%]';
+
+    // 各走行から系列を作る。timeFn/progFnで値の取り出し方を切り替える
+    const mkSeries = (timeFn, progFn) => runs.map((r, i) => {
+      let points = [];
+      if (axis === 'time') {
+        const ss = Analysis.sectionSeries(r);
+        if (ss) points = ss.tS.map((t, k) => ({ x: t, y: timeFn(ss, k) }));
+      } else {
+        const p = Analysis.progress200(r);
+        if (p) {
+          const ys = progFn(p);
+          points = ys.map((y, k) => ({ x: k / (ys.length - 1) * 100, y }));
+        }
+      }
+      return { label: r.name, points, thick: r === baseRun, color: Charts.COLORS[i % Charts.COLORS.length] };
+    });
+
+    let latgSeries = mkSeries((ss, k) => ss.ay[k] / 9.81, p => p.ay.map(v => v / 9.81));
+
+    // 再現性モード+進行率表示のとき、横Gに「平均±1σ」の帯を重ねてばらつきを可視化
+    if (mode === 'repro' && axis === 'progress') {
+      const rep = Analysis.reproducibility(runs);
+      if (rep) {
+        const n = rep.meanCurve.length;
+        const up = rep.meanCurve.map((m, k) => ({ x: k / (n - 1) * 100, y: (m + rep.sdCurve[k]) / 9.81 }));
+        const dn = rep.meanCurve.map((m, k) => ({ x: k / (n - 1) * 100, y: (m - rep.sdCurve[k]) / 9.81 }));
+        latgSeries = [
+          { label: '±1σの帯', points: up, borderWidth: 0, color: 'rgba(255,255,255,0)', bgColor: 'rgba(255,255,255,0.13)' },
+          { label: '_band', points: dn, borderWidth: 0, color: 'rgba(255,255,255,0)', fillToPrev: true, bgColor: 'rgba(255,255,255,0.13)' },
+          ...latgSeries
+        ];
+      }
+    }
+
+    Charts.setMultiSeries(cmpCharts.latg, latgSeries);
+    Charts.setMultiSeries(cmpCharts.yaw, mkSeries((ss, k) => ss.gz[k], p => p.gz));
+    Charts.setMultiSeries(cmpCharts.speed, mkSeries((ss, k) => ss.v[k] * 3.6, p => p.v.map(v => v * 3.6)));
+
+    for (const key of ['latg', 'yaw', 'speed']) {
+      const ch = cmpCharts[key];
+      if (ch) {
+        ch.options.scales.x.title.display = true;
+        ch.options.scales.x.title.text = xLabel;
+        ch.update('none');
+      }
+    }
+  }
+
+  // +/-符号付きの数値表示
+  function fmtSigned(v, digits) { return (v >= 0 ? '+' : '') + v.toFixed(digits); }
+
+  // スコア表と講評コメントを表示する
+  function renderCompareScores() {
+    const { runs, baseRun, mode } = currentCompare;
+    const scoresEl = $('compare-scores');
+    const commentEl = $('compare-comment');
+    let comments = [];
+
+    if (mode === 'expert') {
+      const rows = runs.filter(r => r !== baseRun)
+        .map(r => ({ name: r.name, cmp: Analysis.compareToBase(baseRun, r) }));
+      scoresEl.innerHTML = `
+        <table class="score-table">
+          <tr><th>走行</th><th>一致度</th><th>タイム差</th><th>最大横G差</th><th>横G波形差</th><th>スムーズネス差</th><th>切り返し</th></tr>
+          ${rows.map(({ name, cmp }) => cmp ? `<tr>
+            <td>${escapeHtml(name)}</td>
+            <td>${cmp.matchScore}点</td>
+            <td>${fmtSigned(cmp.timeDiffS, 1)}秒</td>
+            <td>${fmtSigned(cmp.maxLatGDiff, 2)}G</td>
+            <td>${cmp.rmseLatG.toFixed(2)}</td>
+            <td>${fmtSigned(cmp.smoothnessDiff, 0)}点</td>
+            <td>${cmp.timingShiftPct === null ? '-' : fmtSigned(cmp.timingShiftPct, 1) + '%'}</td>
+          </tr>` : '').join('')}
+        </table>
+        <p class="hint">横G波形差はRMSE [m/s²](小さいほどお手本に近い)。切り返しの「+」はお手本より遅れ、「−」は早い。</p>`;
+      comments = Analysis.adviceComments('expert', rows);
+    } else {
+      const rep = Analysis.reproducibility(runs);
+      if (!rep) {
+        scoresEl.innerHTML = '<p class="hint">比較できるデータが足りません(計測区間が検出できない走行があります)。</p>';
+        commentEl.classList.add('hidden');
+        return;
+      }
+      scoresEl.innerHTML = `
+        <div class="summary-grid">
+          <div class="summary-item"><div class="label">再現性スコア</div><div class="value">${rep.score} 点</div></div>
+          <div class="summary-item"><div class="label">横Gの平均ばらつき</div><div class="value">${(rep.meanSd / 9.81).toFixed(3)} G</div></div>
+          <div class="summary-item"><div class="label">タイムのばらつき</div><div class="value">${rep.timeCvPct.toFixed(1)} %</div></div>
+        </div>`;
+      comments = Analysis.adviceComments('repro', rep);
+    }
+
+    commentEl.classList.toggle('hidden', comments.length === 0);
+    commentEl.innerHTML = '<strong>講評:</strong><br>' + comments.map(escapeHtml).join('<br>');
+  }
+
   // HTMLに埋め込む文字列を無害化する
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, c =>
@@ -481,6 +752,29 @@ const App = (() => {
     $('btn-start').addEventListener('click', startRecording);
     $('btn-stop').addEventListener('click', () => Recorder.stop());
 
+    // リアルタイム表示の設定(項目・時間幅・縦軸)
+    $('live-item').addEventListener('change', e => {
+      settings.live.item = e.target.value;
+      saveSettings();
+      applyLiveOptions();
+    });
+    $('live-window').addEventListener('change', e => {
+      settings.live.windowS = +e.target.value;
+      saveSettings();
+      applyLiveOptions();
+    });
+    $('live-ymode').addEventListener('change', e => {
+      settings.live.yMode = e.target.value;
+      saveSettings();
+      applyLiveOptions();
+    });
+    $('live-yfixed').addEventListener('change', e => {
+      const v = Math.abs(+e.target.value) || 0.1;
+      settings.live.yFixedBy[settings.live.item] = v;
+      saveSettings();
+      applyLiveOptions();
+    });
+
     // 結果画面
     $('btn-save-meta').addEventListener('click', saveMeta);
     $('btn-download-csv').addEventListener('click', () => {
@@ -490,25 +784,18 @@ const App = (() => {
       if (currentRun && resultVideoBlob) Storage2.downloadVideo(currentRun, resultVideoBlob);
     });
 
-    // グラフタップ → 動画をその時刻にシーク(データと動画は同じ時刻基準)
-    $('preview-chart').addEventListener('click', (e) => {
-      const run = currentRun;
-      const videoEl = $('result-video');
-      if (!run || !run.samples.length || !videoEl.src) return;
-      const rect = e.currentTarget.getBoundingClientRect();
-      const frac = (e.clientX - rect.left) / rect.width;
-      const tMs = frac * run.samples[run.samples.length - 1].tMs;
-      // 動画内時刻 = (センサー時刻 − 動画開始オフセット) / 1000
-      const offset = run.videoStartOffsetMs || 0;
-      videoEl.currentTime = Math.max(0, (tMs - offset) / 1000);
-    });
-
-    // 動画再生中 → グラフ上に現在位置の白線を動かす(双方向同期)
+    // 動画再生中 → グラフ上に現在位置の白線を動かす(双方向同期。
+    // グラフ→動画のシークは各チャートのonClickX = seekVideoToSeconds)
     $('result-video').addEventListener('timeupdate', () => {
       const run = currentRun;
       if (!run || $('screen-result').classList.contains('hidden')) return;
       const offset = run.videoStartOffsetMs || 0;
-      drawPreviewChart(run, $('result-video').currentTime * 1000 + offset);
+      updateResultOverlays(run, $('result-video').currentTime + offset / 1000);
+    });
+
+    // 結果画面の表示項目チェックボックス(この場での切り替え。既定値は設定画面)
+    ['tg-latg', 'tg-yaw', 'tg-speed', 'tg-dist'].forEach(id => {
+      $(id).addEventListener('change', applyChartToggles);
     });
 
     // 設定画面
@@ -521,6 +808,33 @@ const App = (() => {
     });
     $('set-mock').addEventListener('change', e => { settings.mock = e.target.checked; saveSettings(); });
     $('set-mock-preset').addEventListener('change', e => { settings.mockPreset = e.target.value; saveSettings(); });
+    // デフォルト表示項目(結果画面のグラフ既定値)
+    [['set-chart-latg', 'latg'], ['set-chart-yaw', 'yaw'], ['set-chart-speed', 'speed'], ['set-chart-dist', 'dist']]
+      .forEach(([id, key]) => {
+        $(id).addEventListener('change', e => { settings.charts[key] = e.target.checked; saveSettings(); });
+      });
+
+    // 比較画面
+    $('btn-run-compare').addEventListener('click', runCompare);
+    document.querySelectorAll('input[name="cmp-axis"]').forEach(r => {
+      r.addEventListener('change', () => { if (currentCompare) drawCompare(); });
+    });
+    // デモデータ作成(比較機能のお試し用)
+    $('btn-demo-data').addEventListener('click', async () => {
+      const btn = $('btn-demo-data');
+      btn.disabled = true;
+      btn.textContent = '作成中…';
+      try {
+        await Mock.createDemoRuns();
+        btn.textContent = '作成しました ✓(走行一覧を見てください)';
+      } catch (e) {
+        btn.textContent = '作成に失敗しました: ' + e.message;
+      } finally {
+        btn.disabled = false;
+        setTimeout(() => { btn.textContent = 'デモデータを作成(お手本1本+練習2本)'; }, 3000);
+      }
+    });
+
     $('btn-wipe').addEventListener('click', async () => {
       if (confirm('保存されたすべての走行データを削除します。よろしいですか?')) {
         await Storage2.wipeAll();

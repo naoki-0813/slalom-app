@@ -183,11 +183,64 @@ const Mock = (() => {
     }
   }
 
+  // ---------- デモデータ生成 ----------
+  // 記録操作なしで比較機能を試せるよう、走行データを直接合成してIndexedDBに保存する。
+  // 波形は上のモック走行プロファイルと同じ(車両座標系で直接生成するのでキャリブレーション不要)
+
+  function makeDemoRun(name, wobbly, isExpert) {
+    const wAmp = [], wPh = [];
+    for (let i = 0; i < 5; i++) {
+      wAmp.push(1 + (Math.random() - 0.5) * (wobbly ? 0.6 : 0.06));
+      wPh.push((Math.random() - 0.5) * (wobbly ? 0.8 : 0.06));
+    }
+    const samples = [], gps = [];
+    for (let t = 0; t < 31; t += 1 / 60) {
+      let ax = 0, ay = 0, yaw = 0;
+      if (t < ACCEL_END) ax = TOP_SPEED / ACCEL_END;
+      else if (t >= SLALOM_END && t < DECEL_END) ax = -TOP_SPEED / (DECEL_END - SLALOM_END);
+      if (t >= ACCEL_END && t < SLALOM_END) {
+        const ts = t - ACCEL_END;
+        const cy = Math.min(4, Math.floor(ts / PYLON_PERIOD));
+        ay = LAT_G_AMP * wAmp[cy] * Math.sin(2 * Math.PI * ts / PYLON_PERIOD + wPh[cy]);
+        yaw = YAW_AMP * wAmp[cy] * Math.cos(2 * Math.PI * ts / PYLON_PERIOD + wPh[cy]);
+      }
+      samples.push({
+        tMs: t * 1000,
+        ax: ax + noise(0.15), ay: ay + noise(0.15), az: noise(0.15),
+        gx: 0, gy: 0, gz: yaw + noise(0.5)
+      });
+    }
+    for (let t = 0; t < 31; t += 1) {
+      let v = 0;
+      if (t < ACCEL_END) v = TOP_SPEED * t / ACCEL_END;
+      else if (t < SLALOM_END) v = TOP_SPEED;
+      else if (t < DECEL_END) v = TOP_SPEED * (1 - (t - SLALOM_END) / (DECEL_END - SLALOM_END));
+      gps.push({ tMs: t * 1000, lat: 35.68123 + t * 1e-5, lon: 139.76712 + t * 1e-5, speedMps: Math.max(0, v + noise(0.2)), accuracyM: 5 });
+    }
+    const run = {
+      name, driver: 'デモ', isExpert,
+      createdAt: new Date().toISOString(),
+      calib: null, samples, gps, metrics: {}, videoStartOffsetMs: null
+    };
+    const det = Analysis.detectSection(samples);
+    run.sectionStartMs = det ? det.startMs : null;
+    run.sectionEndMs = det ? det.endMs : null;
+    run.metrics = Analysis.computeMetrics(run);
+    return run;
+  }
+
+  // デモ走行3本(お手本・練習・ばらつき)を保存する
+  async function createDemoRuns() {
+    await Storage2.saveRun(makeDemoRun('デモ: お手本', false, true));
+    await Storage2.saveRun(makeDemoRun('デモ: 練習1本目', false, false));
+    await Storage2.saveRun(makeDemoRun('デモ: 練習2本目(ばらつき)', true, false));
+  }
+
   return {
     get enabled() { return enabled; },
     set enabled(v) { enabled = v; if (!v) stop(); },
     get preset() { return preset; },
     set preset(v) { preset = v; },
-    start, stop, beginRun
+    start, stop, beginRun, createDemoRuns
   };
 })();

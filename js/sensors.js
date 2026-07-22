@@ -157,10 +157,11 @@ const Sensors = (() => {
     if (typeof Mock !== 'undefined') Mock.stop();
   }
 
-  // GPSの購読を開始する(モックONならモック側が流す)
+  // GPSの購読を開始する(モックONならモック側が流す)。二重起動は無視
   function startGps() {
     if (typeof Mock !== 'undefined' && Mock.enabled) return;
     if (!navigator.geolocation) return;
+    if (gpsWatchId !== null) return;
     gpsWatchId = navigator.geolocation.watchPosition(
       (pos) => {
         _injectGps({
